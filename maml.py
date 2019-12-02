@@ -200,8 +200,12 @@ class MAML:
         weights['b4'] = tf.Variable(tf.zeros([self.dim_hidden]))
         if FLAGS.datasource == 'miniimagenet':
             # assumes max pooling
-            weights['w5'] = tf.get_variable('w5', [self.dim_hidden*5*5, self.dim_output], initializer=fc_initializer)
-            weights['b5'] = tf.Variable(tf.zeros([self.dim_output]), name='b5')
+
+            weights['w5'] = tf.get_variable('w5', [self.dim_hidden * 5 * 5, 32], initializer=fc_initializer)
+            weights['b5'] = tf.Variable(tf.zeros([32]), name='b5')
+            #
+            weights['w6'] = tf.get_variable('w6', [32, self.dim_output], initializer=fc_initializer)
+            weights['b6'] = tf.Variable(tf.zeros([self.dim_output]), name='b6')
         else:
             weights['w5'] = tf.Variable(tf.random_normal([self.dim_hidden, self.dim_output]), name='w5')
             weights['b5'] = tf.Variable(tf.zeros([self.dim_output]), name='b5')
@@ -222,6 +226,6 @@ class MAML:
         else:
             hidden4 = tf.reduce_mean(hidden4, [1, 2])
 
-        return tf.matmul(hidden4, weights['w5']) + weights['b5']
-
-
+        hidden5 = tf.matmul(hidden4, weights['w5']) + weights['b5']
+        hidden5 = normalize(hidden5, tf.nn.relu, reuse, scope + '4')
+        return tf.matmul(hidden5, weights['w6']) + weights['b6']

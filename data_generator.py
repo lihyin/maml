@@ -91,14 +91,29 @@ class DataGenerator(object):
         # make list of files
         print('Generating filenames')
         all_filenames = []
+        all_files = list()
+        for folder in folders:
+            for address in os.listdir(folder):
+                all_files.append(os.path.join(folder, address))
+        random.shuffle(all_files)
+
         for _ in range(num_total_batches):
-            sampled_character_folders = random.sample(folders, self.num_classes)
-            random.shuffle(sampled_character_folders)
-            labels_and_images = get_images(sampled_character_folders, range(self.num_classes), nb_samples=self.num_samples_per_class, shuffle=False)
-            # make sure the above isn't randomized order
-            labels = [li[0] for li in labels_and_images]
-            filenames = [li[1] for li in labels_and_images]
-            all_filenames.extend(filenames)
+            if train:
+
+                sampled_characters = random.sample(all_files, self.num_classes)
+
+                for sampled_character in sampled_characters:
+                    all_filenames.append(sampled_character)
+                    all_filenames.append(sampled_character)
+                labels = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]
+            else:
+                sampled_character_folders = random.sample(folders, self.num_classes)
+                random.shuffle(sampled_character_folders)
+                labels_and_images = get_images(sampled_character_folders, range(self.num_classes), nb_samples=self.num_samples_per_class, shuffle=False)
+                # make sure the above isn't randomized order
+                labels = [li[0] for li in labels_and_images]
+                filenames = [li[1] for li in labels_and_images]
+                all_filenames.extend(filenames)
 
         # make queue for tensorflow to read from
         filename_queue = tf.train.string_input_producer(tf.convert_to_tensor(all_filenames), shuffle=False)

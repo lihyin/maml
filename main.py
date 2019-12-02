@@ -38,25 +38,25 @@ from tensorflow.python.platform import flags
 FLAGS = flags.FLAGS
 
 ## Dataset/method options
-flags.DEFINE_string('datasource', 'sinusoid', 'sinusoid or omniglot or miniimagenet')
+flags.DEFINE_string('datasource', 'miniimagenet', 'sinusoid or omniglot or miniimagenet')
 flags.DEFINE_integer('num_classes', 5, 'number of classes used in classification (e.g. 5-way classification).')
 # oracle means task id is input (only suitable for sinusoid)
 flags.DEFINE_string('baseline', None, 'oracle, or None')
 
 ## Training options
 flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
-flags.DEFINE_integer('metatrain_iterations', 15000, 'number of metatraining iterations.') # 15k for omniglot, 50k for sinusoid
-flags.DEFINE_integer('meta_batch_size', 25, 'number of tasks sampled per meta-update')
+flags.DEFINE_integer('metatrain_iterations', 60000, 'number of metatraining iterations.') # 15k for omniglot, 50k for sinusoid
+flags.DEFINE_integer('meta_batch_size', 8, 'number of tasks sampled per meta-update')
 flags.DEFINE_float('meta_lr', 0.001, 'the base learning rate of the generator')
-flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner gradient update (K for K-shot learning).')
-flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
+flags.DEFINE_integer('update_batch_size', 1, 'number of examples used for inner gradient update (K for K-shot learning).')
+flags.DEFINE_float('update_lr', 0.05, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 
 ## Model options
 flags.DEFINE_string('norm', 'batch_norm', 'batch_norm, layer_norm, or None')
-flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 32 for miniimagenet, 64 for omiglot.')
+flags.DEFINE_integer('num_filters', 32, 'number of filters for conv nets -- 32 for miniimagenet, 64 for omiglot.')
 flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
-flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
+flags.DEFINE_bool('max_pool', True, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
 
 ## Logging, saving, and testing options
@@ -68,10 +68,14 @@ flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest mo
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
 flags.DEFINE_float('train_update_lr', -1, 'value of inner gradient step step during training. (use if you want to test with a different value)') # 0.1 for omniglot
+TEST_NUM_UPDATES = 50
+# Run with more augmentation techniques
+# Run with one more layer
+
 
 def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
     SUMMARY_INTERVAL = 100
-    SAVE_INTERVAL = 1000
+    SAVE_INTERVAL = 500
     if FLAGS.datasource == 'sinusoid':
         PRINT_INTERVAL = 1000
         TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
@@ -225,7 +229,7 @@ def main():
             if FLAGS.train == True:
                 test_num_updates = 1  # eval on at least one update during training
             else:
-                test_num_updates = 10
+                test_num_updates = TEST_NUM_UPDATES
         else:
             test_num_updates = 10
 
@@ -244,7 +248,8 @@ def main():
         else:
             if FLAGS.datasource == 'miniimagenet': # TODO - use 15 val examples for imagenet?
                 if FLAGS.train:
-                    data_generator = DataGenerator(FLAGS.update_batch_size+15, FLAGS.meta_batch_size)  # only use one datapoint for testing to save memory
+                    # data_generator = DataGenerator(FLAGS.update_batch_size+15, FLAGS.meta_batch_size)  # only use one datapoint for testing to save memory
+                    data_generator = DataGenerator(FLAGS.update_batch_size * 2, FLAGS.meta_batch_size)  # only use one datapoint for testing to save memory
                 else:
                     data_generator = DataGenerator(FLAGS.update_batch_size*2, FLAGS.meta_batch_size)  # only use one datapoint for testing to save memory
             else:
@@ -271,7 +276,60 @@ def main():
             inputb = tf.slice(image_tensor, [0,num_classes*FLAGS.update_batch_size, 0], [-1,-1,-1])
             labela = tf.slice(label_tensor, [0,0,0], [-1,num_classes*FLAGS.update_batch_size, -1])
             labelb = tf.slice(label_tensor, [0,num_classes*FLAGS.update_batch_size, 0], [-1,-1,-1])
-            input_tensors = {'inputa': inputa, 'inputb': inputb, 'labela': labela, 'labelb': labelb}
+
+            import tensorflow_hub as hub
+            augmentation_module = hub.Module(
+                'https://tfhub.dev/google/image_augmentation/nas_cifar/1', name='am1'
+            )
+
+            augmentation_module2 = hub.Module(
+                'https://tfhub.dev/google/image_augmentation/flipx_crop_rotate_color/1', name='am2'
+            )
+
+
+            meta_batch_size = inputa.get_shape()[0]
+            dim = inputa.get_shape()[1]
+
+            inputb = tf.reshape(inputa, (meta_batch_size, dim, 84, 84, 3))
+            result = list()
+            for i in range(meta_batch_size):
+                images = augmentation_module({
+                        'images': inputb[i, ...],
+                        'image_size': (84, 84),
+                        'augmentation': True,
+                    }, signature='from_decoded_images'
+                )
+
+                images = augmentation_module2({
+                        'images': images,
+                        'image_size': (84, 84),
+                        'augmentation': True,
+                    }, signature='from_decoded_images'
+                )
+
+                transforms = [
+                    1,
+                    0,
+                    -tf.random.uniform(shape=(), minval=-20, maxval=20, dtype=tf.int32),
+                    0,
+                    1,
+                    -tf.random.uniform(shape=(), minval=-20, maxval=20, dtype=tf.int32),
+                    0,
+                    0
+                ]
+                images = tf.contrib.image.transform(images, transforms)
+                result.append(images)
+
+
+            inputb = tf.stack(result)
+
+            inputb = tf.reshape(inputb, (meta_batch_size, dim, 84 * 84 * 3))
+            labelb = labela
+
+            if FLAGS.train:
+                input_tensors = {'inputa': inputb, 'inputb': inputa, 'labela': labela, 'labelb': labelb}
+            else:
+                input_tensors = {'inputa': inputa, 'inputb': inputb, 'labela': labela, 'labelb': labelb}
 
         random.seed(6)
         image_tensor, label_tensor = data_generator.make_data_tensor(train=False)
