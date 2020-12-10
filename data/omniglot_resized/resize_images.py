@@ -12,7 +12,7 @@ Usage instructions:
 from PIL import Image
 import glob
 
-image_path = '*/*/'
+image_path = '*/*/*/'
 
 all_images = glob.glob(image_path + '*')
 
